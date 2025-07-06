@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Book a Car - GoPanda Cars</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- Navigation (same as index.html) -->
+  
+  <div class="container py-5">
+    <h1 class="text-center mb-5">Book Your Car</h1>
+    
+    <div class="row">
+      <div class="col-md-8">
+        <div class="card mb-4">
+          <div class="card-body">
+            <form id="bookingForm">
+              <div class="mb-3">
+                <label class="form-label">Select Car</label>
+                <select class="form-select" id="carSelect" required>
+                  <option value="">Choose a car...</option>
+                </select>
+              </div>
+              
+              <div class="row">
+                <div class="col-md-6 mb-3">
+                  <label class="form-label">Pickup Date</label>
+                  <input type="date" class="form-control" id="pickupDate" required>
+                </div>
+                <div class="col-md-6 mb-3">
+                  <label class="form-label">Return Date</label>
+                  <input type="date" class="form-control" id="returnDate" required>
+                </div>
+              </div>
+              
+              <div class="mb-3">
+                <label class="form-label">Coupon Code (Optional)</label>
+                <input type="text" class="form-control" id="couponCode">
+              </div>
+              
+              <div class="alert alert-info">
+                <h5>Estimated Total: <span id="estimatedTotal">₹0</span></h5>
+                <p id="priceBreakdown"></p>
+              </div>
+              
+              <button type="submit" class="btn btn-primary w-100">Proceed to Payment</button>
+            </form>
+          </div>
+        </div>
+      </div>
+      
+      <div class="col-md-4">
+        <div class="card">
+          <div class="card-body">
+            <h4 class="card-title">Booking Summary</h4>
+            <img id="selectedCarImage" src="" class="img-fluid mb-3 d-none">
+            <h5 id="selectedCarName">No car selected</h5>
+            <p id="selectedCarDescription" class="text-muted"></p>
+            <ul class="list-group list-group-flush mb-3">
+              <li class="list-group-item d-flex justify-content-between">
+                <span>Pickup Date:</span>
+                <span id="summaryPickupDate">-</span>
+              </li>
+              <li class="list-group-item d-flex justify-content-between">
+                <span>Return Date:</span>
+                <span id="summaryReturnDate">-</span>
+              </li>
+              <li class="list-group-item d-flex justify-content-between">
+                <span>Duration:</span>
+                <span id="summaryDuration">-</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="js/firebase-config.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/bookings.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+      // Check auth
+      const user = await checkAuthState();
+      if (!user) {
+        window.location.href = 'login.html';
+        return;
+      }
+      
+      // Load available cars
+      await loadAvailableCars();
+      setupBookingForm();
+    });
+    
+    async function loadAvailableCars() {
+      // In a real app, fetch from Firestore
+      const cars = [
+        {
+          id: 'car1',
+          name: 'Maruti Swift',
+          image: 'images/swift.jpg',
+          description: 'Compact hatchback with great mileage',
+          price12hrs: 1200,
+          price24hrs: 2000,
+          category: 'economy'
+        },
+        // Add more cars...
+      ];
+      
+      const select = document.getElementById('carSelect');
+      cars.forEach(car => {
+        const option = document.createElement('option');
+        option.value = car.id;
+        option.textContent = `${car.name} (₹${car.price12hrs}/12h or ₹${car.price24hrs}/24h)`;
+        option.dataset.car = JSON.stringify(car);
+        select.appendChild(option);
+      });
+      
+      select.addEventListener('change', updateSelectedCar);
+    }
+    
+    function updateSelectedCar() {
+      const select = document.getElementById('carSelect');
+      const selectedOption = select.options[select.selectedIndex];
+      
+      if (!selectedOption.value) {
+        document.getElementById('selectedCarImage').classList.add('d-none');
+        document.getElementById('selectedCarName').textContent = 'No car selected';
+        document.getElementById('selectedCarDescription').textContent = '';
+        return;
+      }
+      
+      const car = JSON.parse(selectedOption.dataset.car);
+      const carImage = document.getElementById('selectedCarImage');
+      
+      carImage.src = car.image;
+      carImage.classList.remove('d-none');
+      document.getElementById('selectedCarName').textContent = car.name;
+      document.getElementById('selectedCarDescription').textContent = car.description;
+      
+      updateBookingSummary();
+    }
+    
+    function setupBookingForm() {
+      const today = new Date().toISOString().split('T')[0];
+      document.getElementById('pickupDate').min = today;
+      document.getElementById('returnDate').min = today;
+      
+      // Update summary when dates change
+      document.getElementById('pickupDate').addEventListener('change', updateBookingSummary);
+      document.getElementById('returnDate').addEventListener('change', updateBookingSummary);
+      
+      // Form submission
+      document.getElementById('bookingForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const select = document.getElementById('carSelect');
+        if (!select.value) {
+          alert('Please select a car');
+          return;
+        }
+        
+        const car = JSON.parse(select.options[select.selectedIndex].dataset.car);
+        const pickupDate = document.getElementById('pickupDate').value;
+        const returnDate = document.getElementById('returnDate').value;
+        const couponCode = document.getElementById('couponCode').value || undefined;
+        
+        try {
+          const bookingId = await createBooking({
+            carId: car.id,
+            carName: car.name,
+            carImage: car.image,
+            startDate: pickupDate,
+            endDate: returnDate,
+            price12hrs: car.price12hrs,
+            price24hrs: car.price24hrs,
+            couponCode: couponCode
+          });
+          
+          window.location.href = `payment.html?bookingId=${bookingId}`;
+        } catch (error) {
+          alert('Booking failed: ' + error.message);
+        }
+      });
+    }
+    
+    function updateBookingSummary() {
+      const pickupDate = document.getElementById('pickupDate').value;
+      const returnDate = document.getElementById('returnDate').value;
+      const select = document.getElementById('carSelect');
+      
+      // Update dates in summary
+      document.getElementById('summaryPickupDate').textContent = pickupDate || '-';
+      document.getElementById('summaryReturnDate').textContent = returnDate || '-';
+      
+      if (!pickupDate || !returnDate || !select.value) {
+        document.getElementById('summaryDuration').textContent = '-';
+        document.getElementById('estimatedTotal').textContent = '₹0';
+        document.getElementById('priceBreakdown').textContent = '';
+        return;
+      }
+      
+      // Calculate duration
+      const start = new Date(pickupDate);
+      const end = new Date(returnDate);
+      const durationHours = (end - start) / (1000 * 60 * 60);
+      const durationDays = Math.ceil(durationHours / 24);
+      
+      document.getElementById('summaryDuration').textContent = `${durationDays} day(s)`;
+      
+      // Calculate price
+      const car = JSON.parse(select.options[select.selectedIndex].dataset.car);
+      let price = 0;
+      let breakdown = '';
+      
+      if (durationHours <= 12) {
+        price = car.price12hrs;
+        breakdown = `12 hours: ₹${car.price12hrs}`;
+      } else if (durationHours <= 24) {
+        price = car.price24hrs;
+        breakdown = `24 hours: ₹${car.price24hrs}`;
+      } else {
+        price = durationDays * car.price24hrs;
+        breakdown = `${durationDays} days × ₹${car.price24hrs} = ₹${price}`;
+      }
+      
+      document.getElementById('estimatedTotal').textContent = `₹${price}`;
+      document.getElementById('priceBreakdown').textContent = breakdown;
+    }
+  </script>
+</body>
+</html>
